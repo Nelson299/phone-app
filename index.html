@@ -494,14 +494,14 @@
   }
   .lap-label { color: var(--muted); }
 
-  /* ── Incoming Call Screen ── */
-  #incoming-call {
+  /* ── Shared call screen base ── */
+  #incoming-call, #active-call {
     display: none; position: fixed; inset: 0; z-index: 1001;
     background: linear-gradient(160deg, #1a1a2e 0%, #0d1b2a 100%);
     flex-direction: column; align-items: center; justify-content: space-between;
     padding: 60px 32px 52px;
   }
-  #incoming-call.open { display: flex; }
+  #incoming-call.open, #active-call.open { display: flex; }
 
   .call-top { text-align: center; }
   .call-avatar {
@@ -519,6 +519,7 @@
     50% { box-shadow: 0 0 0 20px rgba(48,209,88,0); }
   }
 
+  /* Incoming call buttons */
   .call-actions {
     display: flex; justify-content: space-around; width: 100%;
   }
@@ -537,6 +538,34 @@
     animation: ring-pulse 1.5s ease-in-out infinite;
   }
   .call-btn span { font-size: 13px; color: rgba(255,255,255,.8); }
+
+  /* Active call */
+  #call-timer { font-size: 18px; color: var(--green); margin-top: 8px; font-variant-numeric: tabular-nums; }
+  #call-status-label { font-size: 16px; color: rgba(255,255,255,.6); margin-top: 4px; }
+
+  .active-call-mid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 20px; width: 100%; max-width: 320px;
+  }
+  .active-call-action {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: none; border: none; cursor: default;
+  }
+  .active-call-action .aca-circle {
+    width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(255,255,255,.12);
+    display: flex; align-items: center; justify-content: center; font-size: 24px;
+  }
+  .active-call-action span { font-size: 12px; color: rgba(255,255,255,.6); }
+
+  .end-call-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .end-call-btn {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: var(--red); border: none; font-size: 30px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .end-call-btn span { font-size: 13px; color: rgba(255,255,255,.7); }
 
   /* ── Secret Unlock Popup ── */
   #unlock-popup {
@@ -751,6 +780,34 @@
   </div>
 </div>
 
+<!-- Active Call Screen -->
+<div id="active-call">
+  <div class="call-top">
+    <div class="call-avatar">👤</div>
+    <div class="call-name">Unknown</div>
+    <div id="call-timer">0:00</div>
+    <div id="call-status-label">Connected</div>
+  </div>
+  <div class="active-call-mid">
+    <div class="active-call-action">
+      <div class="aca-circle">🔇</div>
+      <span>Mute</span>
+    </div>
+    <div class="active-call-action">
+      <div class="aca-circle">🔊</div>
+      <span>Speaker</span>
+    </div>
+    <div class="active-call-action">
+      <div class="aca-circle">⌨️</div>
+      <span>Keypad</span>
+    </div>
+  </div>
+  <div class="end-call-wrap">
+    <button class="end-call-btn" onclick="endCall()">📵</button>
+    <span style="color:rgba(255,255,255,.6);font-size:13px">End</span>
+  </div>
+</div>
+
 <!-- Unlock Popup -->
 <div id="unlock-popup">
   <div class="unlock-box">
@@ -772,6 +829,7 @@ let phoneUnlocked = false;
 
 function dismissUnlock() {
   document.getElementById('unlock-popup').classList.remove('open');
+  initAudioContext(); // must happen during a user tap to unlock the browser audio policy
   goHome();
   setTimeout(triggerIncomingCall, 10000);
 }
@@ -780,28 +838,45 @@ function dismissUnlock() {
    INCOMING CALL + RINGTONE
 ══════════════════════════════ */
 let ringCtx = null, ringTimer = null;
+let callTimerInterval = null, callStartTime = null;
+
+// Audio context must be created during a user gesture — we do it in dismissUnlock()
+// so it's already unlocked when the ring fires 10s later via setTimeout.
+function initAudioContext() {
+  if (!ringCtx) {
+    ringCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+}
+
 const callAudio = new Audio('4700-rick-roll.mp3');
+
+callAudio.addEventListener('ended', () => {
+  // Audio finished — drop the call automatically
+  stopCallTimer();
+  document.getElementById('call-status-label').textContent = 'Call Ended';
+  document.getElementById('call-timer').textContent = '';
+  setTimeout(() => {
+    document.getElementById('active-call').classList.remove('open');
+    openApp('phone', 'Phone');
+  }, 1500);
+});
 
 function playRingBurst(startTime, duration) {
   if (!ringCtx) return;
-
-  // Two square-wave oscillators for a buzzy ring character
   [900, 1400].forEach(freq => {
     const osc  = ringCtx.createOscillator();
     const gain = ringCtx.createGain();
-    // Tremolo LFO at 25 Hz gives the classic "warble"
     const lfo     = ringCtx.createOscillator();
     const lfoGain = ringCtx.createGain();
 
-    osc.type          = 'square';
+    osc.type = 'square';
     osc.frequency.value = freq;
-    lfo.type          = 'sine';
+    lfo.type = 'sine';
     lfo.frequency.value = 25;
-    lfoGain.gain.value  = 0.12;
+    lfoGain.gain.value = 0.12;
 
     lfo.connect(lfoGain);
     lfoGain.connect(gain.gain);
-
     gain.gain.setValueAtTime(0.18, startTime);
     gain.gain.linearRampToValueAtTime(0, startTime + duration);
 
@@ -816,13 +891,12 @@ function playRingBurst(startTime, duration) {
 function singleRing() {
   if (!ringCtx) return;
   const now = ringCtx.currentTime;
-  // "RRING … RRING …" — two 0.45 s bursts, 0.25 s apart, then silence until next interval
-  playRingBurst(now,        0.45);
-  playRingBurst(now + 0.7,  0.45);
+  playRingBurst(now,       0.45);
+  playRingBurst(now + 0.7, 0.45);
 }
 
 function startRing() {
-  ringCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume();
   singleRing();
   ringTimer = setInterval(singleRing, 3500);
 }
@@ -830,7 +904,6 @@ function startRing() {
 function stopRing() {
   clearInterval(ringTimer);
   ringTimer = null;
-  if (ringCtx) { ringCtx.close(); ringCtx = null; }
 }
 
 function triggerIncomingCall() {
@@ -841,17 +914,45 @@ function triggerIncomingCall() {
 function declineCall() {
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
-  callAudio.pause();
-  callAudio.currentTime = 0;
+}
+
+function startCallTimer() {
+  callStartTime = Date.now();
+  callTimerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - callStartTime) / 1000);
+    const m = Math.floor(s / 60);
+    document.getElementById('call-timer').textContent =
+      m + ':' + String(s % 60).padStart(2, '0');
+  }, 1000);
+}
+
+function stopCallTimer() {
+  clearInterval(callTimerInterval);
+  callTimerInterval = null;
 }
 
 function answerCall() {
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
-  if (callAudio.src) {
-    callAudio.play().catch(() => {});
-  }
-  openApp('phone', 'Phone');
+  // Reset active call screen state
+  document.getElementById('call-status-label').textContent = 'Connected';
+  document.getElementById('call-timer').textContent = '0:00';
+  document.getElementById('active-call').classList.add('open');
+  startCallTimer();
+  callAudio.currentTime = 0;
+  callAudio.play().catch(() => {});
+}
+
+function endCall() {
+  callAudio.pause();
+  callAudio.currentTime = 0;
+  stopCallTimer();
+  document.getElementById('call-status-label').textContent = 'Call Ended';
+  document.getElementById('call-timer').textContent = '';
+  setTimeout(() => {
+    document.getElementById('active-call').classList.remove('open');
+    openApp('phone', 'Phone');
+  }, 1000);
 }
 
 /* ══════════════════════════════
