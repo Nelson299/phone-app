@@ -336,10 +336,44 @@
   /* ════════════════════════
      PHONE
   ════════════════════════ */
-  #phone {
-    align-items: center;
-    padding-top: 32px;
+  #phone { padding-top: 0; }
+
+  .phone-tab-bar {
+    display: flex; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; width: 100%;
   }
+  .phone-tab {
+    flex: 1; padding: 12px; text-align: center;
+    cursor: pointer; font-size: 14px; color: var(--muted);
+    border: none; background: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .phone-tab.active { color: var(--text); background: var(--surface2); }
+
+  #phone-keypad-view {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; padding-top: 20px; overflow-y: auto;
+  }
+  #phone-recents-view {
+    flex: 1; display: none; flex-direction: column; overflow-y: auto;
+  }
+
+  .recents-empty {
+    text-align: center; color: var(--muted);
+    padding: 48px 24px; font-size: 15px;
+  }
+  .recent-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+  }
+  .recent-icon { font-size: 28px; flex-shrink: 0; }
+  .recent-info { flex: 1; min-width: 0; }
+  .recent-name { font-size: 16px; color: var(--text); font-weight: 500; }
+  .recent-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .recent-sub.incoming { color: #30d158; }
+  .recent-sub.outgoing { color: #007aff; }
+  .recent-dur { font-size: 13px; color: var(--muted); flex-shrink: 0; }
 
   .dial-display {
     min-height: 90px; width: 100%;
@@ -698,13 +732,22 @@
 
     <!-- ══ PHONE ══ -->
     <section id="phone" class="screen">
-      <div class="dial-display">
-        <span id="dial-number"></span>
-        <button id="dial-del" onclick="dialDel()">⌫</button>
+      <div class="phone-tab-bar">
+        <button class="phone-tab active" onclick="phoneTab('keypad',this)">Keypad</button>
+        <button class="phone-tab" onclick="phoneTab('recents',this)">Recents</button>
       </div>
-      <div class="dial-grid" id="dial-grid"></div>
-      <div class="dial-actions">
-        <button id="call-btn" onclick="makeCall()">📞</button>
+      <div id="phone-keypad-view">
+        <div class="dial-display">
+          <span id="dial-number"></span>
+          <button id="dial-del" onclick="dialDel()">⌫</button>
+        </div>
+        <div class="dial-grid" id="dial-grid"></div>
+        <div class="dial-actions">
+          <button id="call-btn" onclick="makeCall()">📞</button>
+        </div>
+      </div>
+      <div id="phone-recents-view">
+        <div id="recents-list"></div>
       </div>
     </section>
 
@@ -784,7 +827,7 @@
 <div id="active-call">
   <div class="call-top">
     <div class="call-avatar">👤</div>
-    <div class="call-name">Unknown</div>
+    <div class="call-name" id="active-call-name">Unknown</div>
     <div id="call-timer">0:00</div>
     <div id="call-status-label">Connected</div>
   </div>
@@ -839,59 +882,41 @@ function dismissUnlock() {
 ══════════════════════════════ */
 let ringCtx = null, ringTimer = null;
 let callTimerInterval = null, callStartTime = null;
+let activeCallType = 'incoming', activeCallName = 'Unknown', activeCallNumber = 'Unknown';
 
-// Audio context must be created during a user gesture — we do it in dismissUnlock()
-// so it's already unlocked when the ring fires 10s later via setTimeout.
 function initAudioContext() {
-  if (!ringCtx) {
-    ringCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
+  if (!ringCtx) ringCtx = new (window.AudioContext || window.webkitAudioContext)();
 }
 
-const callAudio = new Audio('4700-rick-roll.mp3');
+const callAudio   = new Audio('4700-rick-roll.mp3');
+const puzzleAudio = new Audio('5837-near-puzzle-quote.mp3');
 
-callAudio.addEventListener('ended', () => {
-  // Audio finished — drop the call automatically
-  stopCallTimer();
-  document.getElementById('call-status-label').textContent = 'Call Ended';
-  document.getElementById('call-timer').textContent = '';
-  setTimeout(() => {
-    document.getElementById('active-call').classList.remove('open');
-    openApp('phone', 'Phone');
-  }, 1500);
-});
+callAudio.addEventListener('ended',   () => finishCall());
+puzzleAudio.addEventListener('ended', () => finishCall());
 
 function playRingBurst(startTime, duration) {
   if (!ringCtx) return;
   [900, 1400].forEach(freq => {
-    const osc  = ringCtx.createOscillator();
+    const osc = ringCtx.createOscillator();
     const gain = ringCtx.createGain();
-    const lfo     = ringCtx.createOscillator();
+    const lfo = ringCtx.createOscillator();
     const lfoGain = ringCtx.createGain();
-
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    lfo.type = 'sine';
-    lfo.frequency.value = 25;
+    osc.type = 'square'; osc.frequency.value = freq;
+    lfo.type = 'sine';   lfo.frequency.value = 25;
     lfoGain.gain.value = 0.12;
-
-    lfo.connect(lfoGain);
-    lfoGain.connect(gain.gain);
+    lfo.connect(lfoGain); lfoGain.connect(gain.gain);
     gain.gain.setValueAtTime(0.18, startTime);
     gain.gain.linearRampToValueAtTime(0, startTime + duration);
-
-    osc.connect(gain);
-    gain.connect(ringCtx.destination);
-
-    osc.start(startTime);  osc.stop(startTime + duration);
-    lfo.start(startTime);  lfo.stop(startTime + duration);
+    osc.connect(gain); gain.connect(ringCtx.destination);
+    osc.start(startTime); osc.stop(startTime + duration);
+    lfo.start(startTime); lfo.stop(startTime + duration);
   });
 }
 
 function singleRing() {
   if (!ringCtx) return;
   const now = ringCtx.currentTime;
-  playRingBurst(now,       0.45);
+  playRingBurst(now, 0.45);
   playRingBurst(now + 0.7, 0.45);
 }
 
@@ -902,8 +927,7 @@ function startRing() {
 }
 
 function stopRing() {
-  clearInterval(ringTimer);
-  ringTimer = null;
+  clearInterval(ringTimer); ringTimer = null;
 }
 
 function triggerIncomingCall() {
@@ -914,27 +938,39 @@ function triggerIncomingCall() {
 function declineCall() {
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
+  addCallRecord('incoming', 'Unknown', 'Unknown', 0);
 }
 
 function startCallTimer() {
   callStartTime = Date.now();
   callTimerInterval = setInterval(() => {
     const s = Math.floor((Date.now() - callStartTime) / 1000);
-    const m = Math.floor(s / 60);
     document.getElementById('call-timer').textContent =
-      m + ':' + String(s % 60).padStart(2, '0');
+      Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }, 1000);
 }
 
 function stopCallTimer() {
-  clearInterval(callTimerInterval);
-  callTimerInterval = null;
+  clearInterval(callTimerInterval); callTimerInterval = null;
+}
+
+function finishCall() {
+  const duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
+  stopCallTimer();
+  addCallRecord(activeCallType, activeCallName, activeCallNumber, duration);
+  document.getElementById('call-status-label').textContent = 'Call Ended';
+  document.getElementById('call-timer').textContent = '';
+  setTimeout(() => {
+    document.getElementById('active-call').classList.remove('open');
+    openApp('phone', 'Phone');
+  }, 1500);
 }
 
 function answerCall() {
+  activeCallType = 'incoming'; activeCallName = 'Unknown'; activeCallNumber = 'Unknown';
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
-  // Reset active call screen state
+  document.getElementById('active-call-name').textContent = 'Unknown';
   document.getElementById('call-status-label').textContent = 'Connected';
   document.getElementById('call-timer').textContent = '0:00';
   document.getElementById('active-call').classList.add('open');
@@ -943,16 +979,25 @@ function answerCall() {
   callAudio.play().catch(() => {});
 }
 
-function endCall() {
-  callAudio.pause();
-  callAudio.currentTime = 0;
-  stopCallTimer();
-  document.getElementById('call-status-label').textContent = 'Call Ended';
+function beginOutgoingCall(name, number, audio) {
+  activeCallType = 'outgoing'; activeCallName = name; activeCallNumber = number;
+  document.getElementById('active-call-name').textContent = name;
+  document.getElementById('call-status-label').textContent = 'Calling…';
   document.getElementById('call-timer').textContent = '';
+  document.getElementById('active-call').classList.add('open');
   setTimeout(() => {
-    document.getElementById('active-call').classList.remove('open');
-    openApp('phone', 'Phone');
-  }, 1000);
+    if (!document.getElementById('active-call').classList.contains('open')) return;
+    document.getElementById('call-status-label').textContent = 'Connected';
+    startCallTimer();
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+  }, 2500);
+}
+
+function endCall() {
+  callAudio.pause();   callAudio.currentTime = 0;
+  puzzleAudio.pause(); puzzleAudio.currentTime = 0;
+  finishCall();
 }
 
 /* ══════════════════════════════
@@ -1231,9 +1276,62 @@ function dialDel() {
   el.textContent = el.textContent.slice(0, -1);
   if (!el.textContent) document.getElementById('dial-del').style.visibility = 'hidden';
 }
+/* ══════════════════════════════
+   PHONE APP — TABS + HISTORY
+══════════════════════════════ */
+let callHistory = JSON.parse(localStorage.getItem('callHistory') || '[]');
+
+function phoneTab(id, btn) {
+  document.getElementById('phone-keypad-view').style.display = id === 'keypad' ? 'flex' : 'none';
+  document.getElementById('phone-recents-view').style.display = id === 'recents' ? 'flex' : 'none';
+  document.querySelectorAll('.phone-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (id === 'recents') renderCallHistory();
+}
+
+function addCallRecord(type, name, number, durationSecs) {
+  callHistory.unshift({ type, name, number, duration: durationSecs, time: Date.now() });
+  localStorage.setItem('callHistory', JSON.stringify(callHistory));
+}
+
+function renderCallHistory() {
+  const list = document.getElementById('recents-list');
+  if (!list) return;
+  if (!callHistory.length) {
+    list.innerHTML = '<p class="recents-empty">No recent calls yet.</p>';
+    return;
+  }
+  list.innerHTML = callHistory.map(c => {
+    const label = c.type === 'incoming' ? '↙ Incoming' : '↗ Outgoing';
+    const cls   = c.type === 'incoming' ? 'incoming' : 'outgoing';
+    const icon  = c.type === 'incoming' ? '📲' : '📞';
+    const dur   = c.duration > 0 ? fmtDuration(c.duration) : 'Missed';
+    const time  = new Date(c.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="recent-item">
+      <div class="recent-icon">${icon}</div>
+      <div class="recent-info">
+        <div class="recent-name">${escHtml(c.name || c.number)}</div>
+        <div class="recent-sub ${cls}">${label} · ${time}</div>
+      </div>
+      <div class="recent-dur">${dur}</div>
+    </div>`;
+  }).join('');
+}
+
+function fmtDuration(s) {
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
 function makeCall() {
   const num = document.getElementById('dial-number').textContent;
-  if (num) window.location.href = 'tel:' + num;
+  if (!num) return;
+  if (num === '8675309') {
+    beginOutgoingCall('867-5309', num, puzzleAudio);
+  } else {
+    addCallRecord('outgoing', null, num, 0);
+    window.location.href = 'tel:' + num;
+  }
 }
 
 /* ══════════════════════════════
