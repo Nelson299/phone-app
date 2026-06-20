@@ -494,6 +494,29 @@
   }
   .lap-label { color: var(--muted); }
 
+  /* ── Secret Unlock Popup ── */
+  #unlock-popup {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,.75);
+    align-items: center; justify-content: center;
+  }
+  #unlock-popup.open { display: flex; }
+  .unlock-box {
+    background: var(--surface);
+    border-radius: 20px; padding: 32px 28px;
+    text-align: center; max-width: 300px; width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  }
+  .unlock-box .unlock-emoji { font-size: 52px; margin-bottom: 12px; }
+  .unlock-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  .unlock-box p { font-size: 14px; color: var(--muted); margin-bottom: 24px; line-height: 1.5; }
+  .unlock-ok {
+    width: 100%; padding: 14px;
+    background: var(--green); color: #fff;
+    border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+
   /* ── Utility ── */
   .btn-primary {
     background: var(--blue); color: #fff;
@@ -540,7 +563,7 @@
       <div class="app-icon-img ic-cam">📷</div>
       <span class="app-icon-label">Camera</span>
     </div>
-    <div class="app-icon" onclick="openApp('phone','Phone')">
+    <div class="app-icon" id="phone-icon" onclick="openApp('phone','Phone')" style="display:none">
       <div class="app-icon-img ic-phone">📞</div>
       <span class="app-icon-label">Phone</span>
     </div>
@@ -665,6 +688,16 @@
   </nav>
 </div>
 
+<!-- Unlock Popup -->
+<div id="unlock-popup">
+  <div class="unlock-box">
+    <div class="unlock-emoji">🔓</div>
+    <h2>Correct!</h2>
+    <p>You've unlocked the Phone app. It's now available on your home screen.</p>
+    <button class="unlock-ok" onclick="dismissUnlock()">Got it</button>
+  </div>
+</div>
+
 <!-- Lightbox -->
 <div id="lightbox">
   <button id="lightbox-close" onclick="closeLightbox()">✕</button>
@@ -672,6 +705,13 @@
 </div>
 
 <script>
+let phoneUnlocked = false;
+
+function dismissUnlock() {
+  document.getElementById('unlock-popup').classList.remove('open');
+  goHome();
+}
+
 /* ══════════════════════════════
    HOME SCREEN + NAVIGATION
 ══════════════════════════════ */
@@ -759,21 +799,28 @@ document.getElementById('app').style.display = 'none';
   const res = document.getElementById('calc-result');
   const expr = document.getElementById('calc-expr');
 
+  // Secret sequence: 3 × 2 ÷ 2 + 6 + 5 + 10 − 3 − 8 − 9
+  const SECRET = ['3','×','2','÷','2','+','6','+','5','+','1','0','−','3','−','8','−','9'];
+  let history = [];
+
   function update() { res.textContent = display; }
 
   window.calcPress = function(btn) {
     if (btn === 'C') {
       display = '0'; prev = null; op = null; fresh = false;
-      expr.textContent = '';
+      expr.textContent = ''; history = [];
     } else if (btn in opMap) {
       prev = parseFloat(display); op = opMap[btn]; fresh = true;
       expr.textContent = display + ' ' + btn;
+      history.push(btn);
     } else if (btn === '=') {
       if (prev !== null && op) {
         const r = Function('a,b', 'return a ' + op + ' b')(prev, parseFloat(display));
         expr.textContent = '';
         display = String(parseFloat(r.toFixed(10)));
         prev = null; op = null; fresh = false;
+        checkSecret();
+        history = [];
       }
     } else if (btn === '+/−') {
       display = String(parseFloat(display) * -1);
@@ -782,11 +829,23 @@ document.getElementById('app').style.display = 'none';
     } else if (btn === '.') {
       if (fresh) { display = '0.'; fresh = false; }
       else if (!display.includes('.')) display += '.';
+      history.push(btn);
     } else {
       if (fresh || display === '0') { display = btn; fresh = false; }
       else if (display.length < 12) display += btn;
+      history.push(btn);
     }
     update();
+
+  function checkSecret() {
+    if (history.length !== SECRET.length) return;
+    const match = history.every((v, i) => v === SECRET[i]);
+    if (match && !phoneUnlocked) {
+      phoneUnlocked = true;
+      document.getElementById('phone-icon').style.display = 'flex';
+      document.getElementById('unlock-popup').classList.add('open');
+    }
+  }
   };
 })();
 
