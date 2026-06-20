@@ -494,6 +494,50 @@
   }
   .lap-label { color: var(--muted); }
 
+  /* ── Incoming Call Screen ── */
+  #incoming-call {
+    display: none; position: fixed; inset: 0; z-index: 1001;
+    background: linear-gradient(160deg, #1a1a2e 0%, #0d1b2a 100%);
+    flex-direction: column; align-items: center; justify-content: space-between;
+    padding: 60px 32px 52px;
+  }
+  #incoming-call.open { display: flex; }
+
+  .call-top { text-align: center; }
+  .call-avatar {
+    width: 100px; height: 100px; border-radius: 50%;
+    background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 44px; margin: 0 auto 20px;
+    box-shadow: 0 0 0 8px rgba(255,255,255,.08);
+  }
+  .call-name { font-size: 34px; font-weight: 300; color: #fff; margin-bottom: 6px; }
+  .call-sublabel { font-size: 16px; color: rgba(255,255,255,.6); }
+
+  @keyframes ring-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(48,209,88,.4); }
+    50% { box-shadow: 0 0 0 20px rgba(48,209,88,0); }
+  }
+
+  .call-actions {
+    display: flex; justify-content: space-around; width: 100%;
+  }
+  .call-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    background: none; border: none; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .call-btn-circle {
+    width: 72px; height: 72px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 30px;
+  }
+  .call-btn-circle.decline { background: var(--red); }
+  .call-btn-circle.answer {
+    background: var(--green);
+    animation: ring-pulse 1.5s ease-in-out infinite;
+  }
+  .call-btn span { font-size: 13px; color: rgba(255,255,255,.8); }
+
   /* ── Secret Unlock Popup ── */
   #unlock-popup {
     display: none; position: fixed; inset: 0; z-index: 1000;
@@ -688,6 +732,25 @@
   </nav>
 </div>
 
+<!-- Incoming Call Screen -->
+<div id="incoming-call">
+  <div class="call-top">
+    <div class="call-avatar">👤</div>
+    <div class="call-name">Unknown</div>
+    <div class="call-sublabel">Incoming Call</div>
+  </div>
+  <div class="call-actions">
+    <button class="call-btn" onclick="declineCall()">
+      <div class="call-btn-circle decline">📵</div>
+      <span>Decline</span>
+    </button>
+    <button class="call-btn" onclick="answerCall()">
+      <div class="call-btn-circle answer">📞</div>
+      <span>Accept</span>
+    </button>
+  </div>
+</div>
+
 <!-- Unlock Popup -->
 <div id="unlock-popup">
   <div class="unlock-box">
@@ -710,6 +773,68 @@ let phoneUnlocked = false;
 function dismissUnlock() {
   document.getElementById('unlock-popup').classList.remove('open');
   goHome();
+  setTimeout(triggerIncomingCall, 10000);
+}
+
+/* ══════════════════════════════
+   INCOMING CALL + RINGTONE
+══════════════════════════════ */
+let ringCtx = null, ringTimer = null;
+
+function startRing() {
+  ringCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function singleRing() {
+    if (!ringCtx) return;
+    const now = ringCtx.currentTime;
+
+    // Two-tone phone ring (440 Hz + 480 Hz like a classic landline)
+    [440, 480].forEach(freq => {
+      const osc = ringCtx.createOscillator();
+      const gain = ringCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ringCtx.destination);
+
+      // Fade in
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+      // Hold
+      gain.gain.setValueAtTime(0.25, now + 1.9);
+      // Fade out
+      gain.gain.linearRampToValueAtTime(0, now + 2.0);
+
+      osc.start(now);
+      osc.stop(now + 2.0);
+    });
+  }
+
+  singleRing();
+  // Ring every 4s (2s ring, 2s silence)
+  ringTimer = setInterval(singleRing, 4000);
+}
+
+function stopRing() {
+  clearInterval(ringTimer);
+  ringTimer = null;
+  if (ringCtx) { ringCtx.close(); ringCtx = null; }
+}
+
+function triggerIncomingCall() {
+  document.getElementById('incoming-call').classList.add('open');
+  startRing();
+}
+
+function declineCall() {
+  document.getElementById('incoming-call').classList.remove('open');
+  stopRing();
+}
+
+function answerCall() {
+  document.getElementById('incoming-call').classList.remove('open');
+  stopRing();
+  openApp('phone', 'Phone');
 }
 
 /* ══════════════════════════════
