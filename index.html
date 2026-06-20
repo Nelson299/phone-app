@@ -1270,6 +1270,14 @@ function dialPress(k) {
   if (el.textContent.length >= 15) return;
   el.textContent += k;
   document.getElementById('dial-del').style.visibility = 'visible';
+
+  if (el.textContent === '8675309') {
+    setTimeout(() => {
+      el.textContent = '';
+      document.getElementById('dial-del').style.visibility = 'hidden';
+      beginOutgoingCall('867-5309', '8675309', puzzleAudio);
+    }, 400);
+  }
 }
 function dialDel() {
   const el = document.getElementById('dial-number');
@@ -1324,14 +1332,10 @@ function fmtDuration(s) {
 }
 
 function makeCall() {
-  const num = document.getElementById('dial-number').textContent;
-  if (!num) return;
-  if (num === '8675309') {
-    beginOutgoingCall('867-5309', num, puzzleAudio);
-  } else {
-    addCallRecord('outgoing', null, num, 0);
-    window.location.href = 'tel:' + num;
-  }
+  const num = document.getElementById('dial-number').textContent.trim();
+  if (!num || num === '8675309') return;
+  addCallRecord('outgoing', null, num, 0);
+  window.location.href = 'tel:' + num;
 }
 
 /* ══════════════════════════════
