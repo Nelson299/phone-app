@@ -780,39 +780,51 @@ function dismissUnlock() {
    INCOMING CALL + RINGTONE
 ══════════════════════════════ */
 let ringCtx = null, ringTimer = null;
+const callAudio = new Audio();
+
+function playRingBurst(startTime, duration) {
+  if (!ringCtx) return;
+
+  // Two square-wave oscillators for a buzzy ring character
+  [900, 1400].forEach(freq => {
+    const osc  = ringCtx.createOscillator();
+    const gain = ringCtx.createGain();
+    // Tremolo LFO at 25 Hz gives the classic "warble"
+    const lfo     = ringCtx.createOscillator();
+    const lfoGain = ringCtx.createGain();
+
+    osc.type          = 'square';
+    osc.frequency.value = freq;
+    lfo.type          = 'sine';
+    lfo.frequency.value = 25;
+    lfoGain.gain.value  = 0.12;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(gain.gain);
+
+    gain.gain.setValueAtTime(0.18, startTime);
+    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+
+    osc.connect(gain);
+    gain.connect(ringCtx.destination);
+
+    osc.start(startTime);  osc.stop(startTime + duration);
+    lfo.start(startTime);  lfo.stop(startTime + duration);
+  });
+}
+
+function singleRing() {
+  if (!ringCtx) return;
+  const now = ringCtx.currentTime;
+  // "RRING … RRING …" — two 0.45 s bursts, 0.25 s apart, then silence until next interval
+  playRingBurst(now,        0.45);
+  playRingBurst(now + 0.7,  0.45);
+}
 
 function startRing() {
   ringCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  function singleRing() {
-    if (!ringCtx) return;
-    const now = ringCtx.currentTime;
-
-    // Two-tone phone ring (440 Hz + 480 Hz like a classic landline)
-    [440, 480].forEach(freq => {
-      const osc = ringCtx.createOscillator();
-      const gain = ringCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      osc.connect(gain);
-      gain.connect(ringCtx.destination);
-
-      // Fade in
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
-      // Hold
-      gain.gain.setValueAtTime(0.25, now + 1.9);
-      // Fade out
-      gain.gain.linearRampToValueAtTime(0, now + 2.0);
-
-      osc.start(now);
-      osc.stop(now + 2.0);
-    });
-  }
-
   singleRing();
-  // Ring every 4s (2s ring, 2s silence)
-  ringTimer = setInterval(singleRing, 4000);
+  ringTimer = setInterval(singleRing, 3500);
 }
 
 function stopRing() {
@@ -829,11 +841,16 @@ function triggerIncomingCall() {
 function declineCall() {
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
+  callAudio.pause();
+  callAudio.currentTime = 0;
 }
 
 function answerCall() {
   document.getElementById('incoming-call').classList.remove('open');
   stopRing();
+  if (callAudio.src) {
+    callAudio.play().catch(() => {});
+  }
   openApp('phone', 'Phone');
 }
 
